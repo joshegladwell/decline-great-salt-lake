@@ -1,0 +1,285 @@
+---
+title: "Poster"
+format:
+  html:
+    toc: false
+    code-fold: true
+    embed-resources: true
+---
+This page is a bit more technical than the homepage in that it outlines my process for creating my poster. You can view the final product at the bottom of this page.
+
+I start by reading in the necessary libraries and reading in the data to create the central line plot for the poster. To view the code, unfold the *Code* tab below:
+```{r}
+suppressPackageStartupMessages(library(ggplot2))
+suppressPackageStartupMessages(library(tidyverse))
+suppressPackageStartupMessages(library(extrafont))
+
+water_levels <- read.csv(
+  "../data/raw/USGS_Water_Levels/usgs_water_levels.tsv",
+  sep = '\t', # Tab-separated
+  skip = 29 # Skip first 29 rows
+) %>%
+  # Drop first row after header
+  filter(!row_number() %in% c(1)) %>%
+  # Drop agency_cd and site_no columns
+  select(-c(agency_cd, site_no)) %>%
+  # Rename columns
+  rename(
+    water_level_ft = X178324_62614_00003,
+    data_qual = X178324_62614_00003_cd
+  ) %>%
+  # Change columns to proper type
+  mutate(
+    datetime = as.Date(datetime),
+    water_level_ft = as.numeric(water_level_ft),
+    data_qual = as.factor(data_qual)
+  )
+```
+
+Now that we have loaded in the libraries and read in the data, we can do some initial data cleaning and produce the first line plot:
+```{r}
+line_plot_df <- water_levels %>%
+  # Drop data_qual
+  select(-c(data_qual)) %>%
+  # Drop na
+  drop_na()
+
+water_level_plot <- ggplot(
+  data = line_plot_df, 
+  aes(x = datetime, y = water_level_ft)
+) +
+  geom_line(color = "#10241B") +
+  # geom_point(
+  #   data = line_plot_df, 
+  #   aes(x = as.Date("1989-10-01"), 
+  #       y = water_level_ft[datetime == as.Date("1989-10-01")]),
+  #   color = "#10241B",
+  #   fill = "#CCBB88",
+  #   size = 2,
+  #   pch = 21
+  # ) +
+  # geom_label(
+  #   aes(
+  #     x = as.Date("1989-10-01"), 
+  #     y = water_level_ft[datetime == as.Date("1989-10-01")],
+  #     label = "10/01/1989: Measurement frequency switches\nfrom bi-monthly to daily",
+  #   ),
+  #   nudge_x = 5300,
+  #   nudge_y = 1.75,
+  #   size = 3,
+  #   color = "#10241B",
+  #   fill = "#CCBB88"
+  # ) +
+  labs(
+    title = "Great Salt Lake Water Levels by Time",
+    x = "Date",
+    y = "Water Elevation (ft)"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 18, family = "Optima"),
+    axis.title.x = element_text(size = 16, family = "Optima"),
+    axis.title.y = element_text(size = 16, family = "Optima"),
+    axis.text.x = element_text(size = 14, family = "Optima"),
+    axis.text.y = element_text(size = 14, family = "Optima")
+  ) +
+  scale_x_continuous(
+    breaks = as.Date(paste0(seq(1970, 2020, 10), "-01-01")),
+    labels = seq(1970, 2020, 10)
+  )
+
+ggsave(
+  "../img/poster/plots/line.svg", 
+  device = 'svg',
+  width = 5.5,
+  height = 3,
+  units = "in"
+)
+
+water_level_plot
+```
+As it stands, this is a pretty basic plot. I definitely want to add more information to it in the form of annotations so I can insert more of a story into the plot. My plan is to introduce the topic of Great Salt Lake's decline and then flesh out the story by emphasizing its effect on the brine shrimp and toxic dust.
+
+In order to better understand the level at which the lake poses the highest risk for toxic dust exposure, I use the following code to retrieve data from a study on the toxic dust. The boxplot below illustrates the distribution of arsenic levels found at various sites around the Salt Lake Valley.
+```{r}
+# Read in toxic dust data
+toxins <- read.csv("../data/modified/toxins/dust_data.csv") %>%
+  # Convert date columns to date type
+  mutate(
+    Start_Date = as.Date(Start_Date, format = "%m/%d/%Y"),
+    End_Date = as.Date(End_Date, format = "%m/%d/%Y")
+  )
+
+boxplot(toxins$As)
+```
+
+According to the [CDC Toxicological Profile for Arsenic](https://www.atsdr.cdc.gov/toxprofiles/tp2-c6.pdf) "Natural levels of arsenic in soil usually range from 1 to 40 mg/kg, with a mean of 5 mg/kg." The median in sampled spots around the Great Salt Lake is `r median(toxins$As, na.rm = TRUE)`.
+
+
+After looking into the data further and locating the sample sites on a map, I conclude that the site most representative of the now-dried lake bed is the "Saline beach (Hynek)" site. I use the code below to retrieve the elevation of the site, which is `r toxins[toxins$Site_Name == "Saline beach (Hynek)",]$elev_feet[1]` feet, and plot it on the map. The healthy level for brine shrimp is based on [this article](https://ambrook.com/research/sustainability/great-salt-lake-utah-artemis-brine-shrimp-aquaculture-drought#).
+```{r}
+# Get elevation of the playa
+lake_bed_elev <- toxins[
+  toxins$Site_Name == "Saline beach (Hynek)",
+]$elev_feet[1]
+
+# Save healthy elevation for brine shrimp
+brine_shrimp_elev <- 4191
+
+toxic_col <- "#763A4F"
+shrimp_col <- "#556A82"
+
+# Save x-coord locations for labels
+label1_loc <- as.Date("1982-05-01")
+label2_loc <- as.Date("1989-10-01")
+
+water_level_plot +
+  # Add information about lakebed
+  geom_hline(
+    yintercept = lake_bed_elev, 
+    color = toxic_col,
+    linewidth = 1.5,
+    alpha = 0.7
+  ) +
+  geom_text(
+    aes(
+      x = label1_loc,
+      y = lake_bed_elev,
+      label = "Toxic Lake Bed"
+    ),
+    color = toxic_col,
+    family = "Optima",
+    nudge_y = -1.2
+  ) +
+  # Add information about healthy brine shrimp level
+  geom_hline(
+    yintercept = brine_shrimp_elev,
+    color = shrimp_col,
+    linewidth = 1.5,
+    alpha = 0.7
+  ) +
+  geom_text(
+    aes(
+      x = label2_loc,
+      y = brine_shrimp_elev,
+      label = "Healthy Brine Shrimp Elevation"
+    ),
+    color = shrimp_col,
+    family = "Optima",
+    nudge_y = -1.2
+  )
+
+ggsave(
+  "../img/poster/plots/line.svg", 
+  device = 'svg',
+  width = 5.5,
+  height = 3,
+  units = "in"
+)
+```
+
+## New poster
+After some deliberation, I have settled on a new approach for my poster. This will involve a very minimalist style. The following code generates the similar plot to what I am including above, but it is in white and therefore its output is likely not visible:
+```{r}
+# base_color <- "black"
+base_color <- "white"
+
+
+water_level_minimalist <- ggplot(
+  data = line_plot_df, 
+  aes(x = datetime, y = water_level_ft)
+) +
+  geom_line(
+    color = base_color,
+    linewidth = 3
+  ) +
+  labs(
+    title = "Great Salt Lake Water Levels by Time",
+    x = "Date",
+    y = "Water Elevation (ft)"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_blank(),
+    # plot.title = element_text(
+    #   face = "bold", 
+    #   size = 48, 
+    #   family = "Optima",
+    #   color = base_color
+    # ),
+    # axis.title.x = element_text(
+    #   size = 40, 
+    #   family = "Optima",
+    #   color = base_color
+    # ),
+    axis.title.x = element_blank(), # Add manually on poster
+    # axis.title.y = element_text(
+    #   size = 40, 
+    #   family = "Optima",
+    #   color = base_color
+    # ),
+    axis.title.y = element_blank(), # Add manually on poster
+    # axis.text.x = element_text(
+    #   size = 36, 
+    #   family = "Optima",
+    #   color = base_color
+    # ),
+    axis.text.x = element_blank(), # Add manually on poster
+    axis.text.y = element_text(
+      size = 36, 
+      family = "Optima",
+      color = base_color
+    ),
+    panel.grid.major = element_blank(), 
+    panel.grid.minor = element_blank(),
+    panel.background = element_blank()
+  ) +
+  scale_x_continuous(
+    breaks = c(as.Date("1966-04-15"), as.Date("2023-04-15")),
+    labels = c("1966", "2023")
+  ) +
+  scale_y_continuous(
+    breaks = c(4189, 4211),
+    labels = c("4,189", "4,211")
+  ) +
+  # Add information about lakebed
+  geom_hline(
+    yintercept = lake_bed_elev, 
+    color = base_color,
+    linewidth = 2,
+    linetype = "longdash"
+  ) +
+  # Add information about healthy brine shrimp level
+  geom_hline(
+    yintercept = brine_shrimp_elev,
+    color = base_color,
+    linewidth = 2,
+    linetype = "dotted"
+  ) 
+
+water_level_minimalist
+
+ggsave(
+  "../img/poster/plots/line_white.svg", 
+  device = 'svg',
+  width = 26.8125,
+  height = 5.8288,
+  units = "in"
+)
+```
+
+However, you can see the final poster below:
+
+![](./media/poster_final.jpg){width=30%}
+
+
+## Poster References
+1. Jewell, P. W. Historic low stand of Great Salt Lake, Utah: I. SN Appl. Sci. 3, 757 (2021).
+2. Lozada, G. A. Agricultural Water Use, Hay, and Utah’s Water Future. 26
+https://content.csbs.utah.edu/~lozada/Research/UtahAgWaterUseHay.docx (2022).
+3. Blakowski, M.A., Putman, A.L., Jones, D.K., DiViesti, D.N., Hynek, S.A., Fernandez, D.P., and Mendoza, D., 2022, Dust and sediment data from Great Salt Lake and the Wasatch Front, Utah, 2018-19: U.S. Geological Survey data release, https://doi.org/10.5066/P996NOES.
+4. GLSEP. “Brine Shrimp Harvests.” Utah Division of Wildlife Resources, 20 Mar. 2023, https://wildlife.utah.gov/gslep/harvests.html. 
+5. Penrod, Emma. “One of the World's Strangest - and Most Critical - Fisheries Is in Serious Danger: Ambrook Research.” Ambrook, Ambrook, 31 Aug. 2022, https://ambrook.com/research/sustainability/great-salt-lake-utah-artemis-brine-shrimp-aquaculture-drought#.  
+  
+Photo: Williams, Terry Tempest, and Fazal Sheikh. “I Am Haunted by What I Have Seen at Great Salt Lake.” The New York Times, The New York Times, 25 Mar. 2023, https://www.nytimes.com/2023/03/25/opinion/great-salt-lake-drought-utah-climate-change.html.
+

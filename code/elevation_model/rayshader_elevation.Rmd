@@ -1,0 +1,163 @@
+---
+title: "Great Salt Lake Rayshader - Elevation Change"
+author: "Josh Gladwell"
+date: "2023-04-24"
+output: html_document
+---
+
+# Introduction
+This notebook will follow a very similar structure to `rayshader.Rmd`, which followed [this tutorial](https://www.tylermw.com/a-step-by-step-guide-to-making-3d-maps-with-satellite-imagery-in-r/) to create a 3D model video of the Great Salt Lake. This notebook will implement [the `render_water()` feature](https://www.rayshader.com/reference/render_water.html) to highlight the change in the lake's shape over time.
+
+Start by importing libraries:
+```{r setup, message=FALSE}
+suppressPackageStartupMessages(library(tidyverse))
+suppressPackageStartupMessages(library(xts))
+suppressPackageStartupMessages(library(lubridate))
+suppressPackageStartupMessages(library(rayshader))
+suppressPackageStartupMessages(library(sp))
+suppressPackageStartupMessages(library(raster))
+suppressPackageStartupMessages(library(scales))
+suppressPackageStartupMessages(library(rgdal))
+suppressPackageStartupMessages(library(magick))
+```
+
+```{r}
+# Import data
+print("Importing and processing data...")
+elevation.df <- read.csv(
+  "../../data/raw/USGS_Water_Levels/usgs_water_levels.tsv",
+  sep = "\t",
+  skip = 29
+)[-c(1),] %>%
+  rename(
+    "elev_ft" = "X178324_62614_00003"
+  ) %>%
+  dplyr::select(c(datetime, elev_ft)) %>%
+  filter(elev_ft != "") %>%
+  mutate(
+    datetime = as.Date(datetime),
+    elev_ft = as.numeric(elev_ft)
+  ) %>%
+  filter(
+    day(datetime) == 1 & (
+      month(datetime) == 1 | month(datetime) == 4
+      | month(datetime) == 7 | month(datetime) == 10
+    )
+  )
+
+# Drop first two rows so df starts on 1967 Q1
+elevation.df <- elevation.df[-c(1,2),]
+```
+
+```{r}
+# Get elevation/bathymetry raster
+print("Importing and processing elevation...")
+gsl_overlay <- raster("../../data/modified/rasters/gsl_overlay")
+
+bottom_left = c(y=-113.307704, x=40.527373)
+top_right = c(y=-111.472865, x=41.830442)
+
+extent_latlong = sp::SpatialPoints(
+  rbind(bottom_left, top_right), 
+  proj4string=sp::CRS("+proj=longlat +ellps=WGS84 +datum=WGS84")
+)
+extent_utm = sp::spTransform(extent_latlong, raster::crs(gsl_overlay))
+
+e = raster::extent(extent_utm)
+
+# Crop raster
+print("Cropping elevation raster...")
+gsl_cropped <- raster::crop(gsl_overlay, e)
+
+# Convert to matrix and set elevation to feet
+elevation_matrix <- raster_to_matrix(gsl_cropped)
+elevation_matrix_ft <- elevation_matrix * 3.28084
+
+# Get satellite raster
+print("Importing and processing satellite imagery")
+gsl_rgb_cropped = raster::crop(
+  brick("../../data/modified/rasters/gsl_rbg.gri"), 
+  e
+)
+
+names(gsl_rgb_cropped) = c("r","g","b")
+
+gsl_r_cropped = rayshader::raster_to_matrix(gsl_rgb_cropped$r)
+gsl_g_cropped = rayshader::raster_to_matrix(gsl_rgb_cropped$g)
+gsl_b_cropped = rayshader::raster_to_matrix(gsl_rgb_cropped$b)
+
+gsl_rgb_array = array(0,dim=c(nrow(gsl_r_cropped),ncol(gsl_r_cropped),3))
+
+gsl_rgb_array[,,1] = gsl_r_cropped/255 # Red layer
+gsl_rgb_array[,,2] = gsl_g_cropped/255 # Green layer
+gsl_rgb_array[,,3] = gsl_b_cropped/255 # Blue layer
+
+gsl_rgb_array = aperm(gsl_rgb_array, c(2,1,3))
+
+gsl_rgb_contrast = scales::rescale(gsl_rgb_array,to=c(0,1))
+
+```
+
+```{r}
+# Plot 3D model
+print("Plotting 3D model...")
+plot_3d(
+  gsl_rgb_contrast, elevation_matrix_ft, 
+  windowsize = c(1920,1080), 
+  zscale = 15, 
+  shadowdepth = -50,
+  zoom=0.5, 
+  phi=45,
+  theta=0,
+  fov=70, 
+  background = "white", 
+  shadowcolor = "#523E2B"
+)
+render_water(
+  elevation_matrix_ft,
+  waterdepth = elevation.df[i, 'elev_ft'] - min(elevation_matrix_ft),
+  watercolor = "#0F2419",
+  wateralpha = 1
+)
+render_snapshot(
+  filename = sprintf("imgs/gsl%i.png", i),
+  title_text = paste(
+    "Great Salt Lake Water Land Exposure Change |",
+    quarters(elevation.df[i, 'datetime']),
+    year(elevation.df[i, 'datetime']),
+    "| Elevation:",
+    elevation.df[i, 'elev_ft']
+  ),
+  title_bar_color = "#265F58",
+  title_color = "white", 
+  title_bar_alpha = 1,
+  title_font = "Optima"
+)
+```
+
+```{r}
+i <- 1
+render_water(
+  elevation_matrix_ft,
+  # waterdepth = 0-elevation.df[i, 'elev_ft'],
+  waterdepth = 4200,
+  watercolor = "#0F2419",
+  wateralpha = 1,
+  zscale = 15
+)
+render_snapshot(
+  title_text = paste(
+    "Great Salt Lake Water Land Exposure Change |",
+    quarters(elevation.df[i, 'datetime']),
+    year(elevation.df[i, 'datetime']),
+    "| Elevation:",
+    elevation.df[i, 'elev_ft']
+  ),
+  title_bar_color = "#265F58",
+  title_color = "white", 
+  title_bar_alpha = 1,
+  title_font = "Optima"
+)
+
+```
+
