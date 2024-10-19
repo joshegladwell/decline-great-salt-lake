@@ -1,4 +1,4 @@
-# ANLY 503 Data Visualization Project Final Project - Decline of the Great Salt Lake
+# ANLY 503 Data Visualization Final Project - Decline of the Great Salt Lake
 ## Joshua Gladwell
 This is a project I completed as part of my master's program in Data Science and Analytics at Georgetown University.
 
